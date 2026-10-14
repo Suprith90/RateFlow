@@ -1,0 +1,41 @@
+sequenceDiagram
+    participant Client as API Client
+    participant APIGateway as API Gateway
+    participant RateLimitFilter as Rate Limit Filter
+    participant TokenBucketService as Token Bucket Service
+    participant Redis as Redis
+    participant NotificationController as Notification Controller
+    participant NotificationService as Notification Service
+    participant OutboxPublisher as Outbox Publisher
+    participant OutboxEvent as Outbox Event (DB)
+    participant Postgres as PostgreSQL
+    participant KafkaProducer as Kafka Producer
+    participant KafkaTopic as Kafka Topic
+    participant KafkaConsumer as Kafka Consumer
+    participant EmailProvider as Email Provider
+    participant SMSProvider as SMS Provider
+
+    Client->>APIGateway: HTTP Request with X-User-ID
+    APIGateway->>RateLimitFilter: Process Request
+    RateLimitFilter->>TokenBucketService: Check Allowance
+    TokenBucketService->>Redis: Get/Update Token Bucket (Lua Script)
+    Redis-->>TokenBucketService: Allow/Deny Decision
+    TokenBucketService-->>RateLimitFilter: Return Decision
+    alt Request Allowed
+        RateLimitFilter->>NotificationController: Continue Processing
+        NotificationController->>NotificationService: Create Notification
+        NotificationService->>OutboxPublisher: Publish Event
+        OutboxPublisher->>OutboxEvent: Save to DB (Same TX)
+        OutboxPublisher->>Postgres: INSERT OutboxEvent
+        OutboxPublisher->>KafkaProducer: Send to Kafka (Async)
+        KafkaProducer->>KafkaTopic: Publish Message
+        KafkaTopic-->>KafkaConsumer: Deliver Message
+        KafkaConsumer->>EmailProvider: Process Email Notification
+        KafkaConsumer->>SMSProvider: Process SMS Notification
+        EmailProvider->>KafkaConsumer: Ack/Update Status
+        SMSProvider->>KafkaConsumer: Ack/Update Status
+        KafkaConsumer->>Postgres: Update Notification Status
+    else Request Denied
+        RateLimitFilter->>Client: 429 Too Many Requests
+        RateLimitFilter->>Client: Include Retry-After Header
+    end

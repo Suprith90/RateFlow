@@ -1,0 +1,50 @@
+sequenceDiagram
+    participant NotificationService as Notification Service
+    participant OutboxPublisher as Outbox Publisher
+    participant OutboxEvent as Outbox Event (DB)
+    participant Postgres as PostgreSQL
+    participant KafkaProducer as Kafka Producer
+    participant KafkaTopic as Kafka Topic
+    participant KafkaConsumer as Kafka Consumer
+    participant EmailProvider as Email Provider
+    participant SMSProvider as SMS Provider
+    participant OutboxScheduler as Outbox Scheduler
+
+    %% Notification Creation Flow
+    NotificationService->>OutboxPublisher: publishNotificationCreated()
+    OutboxPublisher->>OutboxEvent: CREATE OutboxEvent
+    OutboxPublisher->>Postgres: INSERT (Within Same TX)
+    OutboxPublisher->>KafkaProducer: sendNotificationEvent()
+    KafkaProducer->>KafkaTopic: Publish Message
+
+    %% Outbox Publisher Async Processing
+    OutboxPublisher->>OutboxPublisher: Update Status to PUBLISHED/FAILED
+    OutboxPublisher->>Postgres: UPDATE OutboxEvent
+
+    %% Kafka Consumer Processing
+    KafkaTopic-->>KafkaConsumer: Deliver Message
+    KafkaConsumer->>Postgres: SELECT Notification by ID
+    alt Notification Type == EMAIL
+        KafkaConsumer->>EmailProvider: sendEmail()
+        EmailProvider->>KafkaConsumer: Return Success/Failure
+    else Notification Type == SMS
+        KafkaConsumer->>SMSProvider: sendSMS()
+        SMSProvider->>KafkaConsumer: Return Success/Failure
+    end
+    KafkaConsumer->>Postgres: UPDATE Notification Status (SENT/FAILED)
+
+    %% Outbox Scheduler (Retry Mechanism)
+    OutboxScheduler->>Postgres: SELECT PENDING OutboxEvents
+    loop Each Pending Event
+        OutboxScheduler->>KafkaProducer: Attempt Publish
+        alt Success
+            OutboxScheduler->>Postgres: UPDATE to PUBLISHED
+        else Failure
+            OutboxScheduler->>Postgres: INCREMENT Retry Count
+            alt Retry Count < Max
+                OutboxScheduler->>Postgres: KEEP as PENDING
+            else Max Retries Exceeded
+                OutboxScheduler->>Postgres: MOVE to FAILED/DLQ
+            end
+        end
+    end

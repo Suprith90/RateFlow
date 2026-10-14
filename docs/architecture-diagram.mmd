@@ -1,0 +1,108 @@
+flowchart TD
+    %% Clients
+    subgraph Clients
+        APIClient[API Client]
+        MobileApp[Mobile App]
+        WebUI[Web Interface]
+    end
+
+    %% API Gateway (conceptual)
+    subgraph API_Layer["API Layer (Spring Boot)"]
+        RateLimitCtrl[RateLimitController]
+        NotificationCtrl[NotificationController]
+        RateLimitFilter[RateLimitFilter]
+    end
+
+    %% Core Services
+    subgraph Core_Services["Core Services"]
+        RateLimitSvc[TokenBucketService]
+        NotificationSvc[NotificationServiceImpl]
+        OutboxPub[OutboxPublisher]
+        OutboxRepo[OutboxEventRepository]
+        OutboxScheduler[OutboxScheduler]
+        KafkaLagMon[KafkaLagMonitoringService]
+        ObsMetrics[ObservabilityMetricsService]
+    end
+
+    %% Data Stores
+    subgraph Data_Stores["Data Stores"]
+        Postgres[(PostgreSQL)]
+        Redis[(Redis)]
+        OutboxTbl[Outbox Events Table]
+        NotifTbl[Notifications Table]
+    end
+
+    %% Messaging
+    subgraph Messaging["Messaging (Kafka)"]
+        KafkaTopic[notification-events Topic]
+        DLQ[Dead Letter Queue]
+        KafkaConsumer[NotificationEventConsumer]
+        KafkaProducer[NotificationEventProducer]
+    end
+
+    %% Providers
+    subgraph Providers["Notification Providers"]
+        EmailProv[MockEmailProvider]
+        SMSProv[MockSMSProvider]
+    end
+
+    %% Observability
+    subgraph Observability["Observability"]
+        Actuator[Spring Boot Actuator]
+        Prometheus[Prometheus Endpoint]
+        Logging[Structured Logging]
+    end
+
+    %% Connections
+    %% Clients to API
+    APIClient --> RateLimitCtrl
+    MobileApp --> RateLimitCtrl
+    WebUI --> RateLimitCtrl
+
+    %% API to Core Services
+    RateLimitCtrl --> RateLimitFilter
+    RateLimitFilter --> RateLimitSvc
+    NotificationCtrl --> NotificationSvc
+    NotificationSvc --> OutboxPub
+    OutboxPub --> OutboxRepo
+    OutboxPub --> OutboxScheduler
+    NotificationSvc --> KafkaProducer
+    KafkaProducer --> KafkaTopic
+    KafkaConsumer --> KafkaTopic
+    KafkaConsumer --> NotificationSvc
+    KafkaConsumer --> OutboxRepo
+    KafkaConsumer --> EmailProv
+    KafkaConsumer --> SMSProv
+    EmailProv --> OutboxRepo
+    SMSProv --> OutboxRepo
+
+    %% Data Store Connections
+    RateLimitSvc --> Redis
+    NotificationSvc --> Postgres
+    OutboxRepo --> Postgres
+    OutboxRepo --> OutboxTbl
+    ObsMetrics --> Postgres
+    ObsMetrics --> Redis
+    ObsMetrics --> KafkaTopic
+
+    %% Observability
+    Actuator --> ObsMetrics
+    Prometheus --> ObsMetrics
+    Logging --> ObsMetrics
+
+    %% Styling
+    classDef client fill:#e3f2fd,stroke:#1565c0;
+    classDef api fill:#fff3e0,stroke:#ef6c00;
+    classDef core fill:#e8f5e9,stroke:#2e7d32;
+    classDef data fill:#f3e5f5,stroke:#6a1b9a;
+    classDef messaging fill:#e0f7fa,stroke:#006064;
+    classDef providers fill:#ffebee,stroke:#c62828;
+    classDef observability fill:#fafafa,stroke:#424242;
+
+    class APIClient,MobileApp,WebUI client;
+    class RateLimitCtrl,NotificationCtrl,RateLimitFilter api;
+    class RateLimitSvc,NotificationSvc,OutboxPub,OutboxRepo,OutboxScheduler,KafkaLagMon,ObsMetrics core;
+    class Postgres,Redis,OutboxTbl,NotifTbl data;
+    class KafkaTopic,DLQ,KafkaConsumer,KafkaProducer messaging;
+    class EmailProv,SMSProv providers;
+    class Actuator,Prometheus,Logging observability;

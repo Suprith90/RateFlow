@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: 'maven'
+
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.m2/repository
+        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-maven-
+
+    - name: Validate Maven project
+      run: mvn -B validate
+
+    - name: Compile source code
+      run: mvn -B compile
+
+    - name: Run tests (unit and integration)
+      run: mvn -B test
+
+    - name: Build application artifact
+      run: mvn -B package -DskipTests
+
+    - name: Build Docker image (validation step)
+      run: |
+        docker build -t rateflow-demo:${{ github.sha }} .
+        docker images | grep rateflow-demo
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: target/surefire-reports
+        retention-days: 7
+
+    - name: Upload build artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: built-jar
+        path: target/*.jar
+        retention-days: 7
